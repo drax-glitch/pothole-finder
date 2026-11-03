@@ -15,10 +15,13 @@ The system pairs an **ESP32-CAM** optical inspection unit with an **ESP32 DevKit
 
 ## Table of Contents
 - [Key Features](#key-features)
+- [System Demo Video](#system-demo-video)
 - [System Architecture](#system-architecture)
 - [Circuit Schematics & Hardware Wiring](#circuit-schematics--hardware-wiring)
 - [Power Distribution Architecture](#power-distribution-architecture)
 - [Computer Vision & Detection Pipeline](#computer-vision--detection-pipeline)
+- [Physical Pothole Measurement & Camera Geometry](#physical-pothole-measurement--camera-geometry)
+- [Intelligent Direction Guidance](#intelligent-direction-guidance)
 - [Severity Scoring Algorithm](#severity-scoring-algorithm)
 - [Network & Communication Protocol](#network--communication-protocol)
 - [Bill of Materials (BOM)](#bill-of-materials-bom)
@@ -30,17 +33,35 @@ The system pairs an **ESP32-CAM** optical inspection unit with an **ESP32 DevKit
 
 ## Key Features
 
+- **Multi-Pothole Simultaneous Detection**: Upgraded greedy Non-Maximum Suppression (NMS) and unconstrained candidate decoding capable of detecting and tracking multiple potholes across the field of view in a single video frame.
+- **Physical Size Measurement (Pixels & Centimetres)**:
+  - Real-time bounding box pixel width ($w$), height ($h$), and area ($w \times h$).
+  - Calibrated planar ground estimation converting image coordinates to real-world metric dimensions (estimated width in cm, length in cm, and estimated road surface area).
+- **Intelligent Direction Guidance (Safe Path Recommendation)**:
+  - Divides the roadway into Left, Centre, and Right corridor lanes.
+  - Automatically recommends steering directions: `STEER LEFT`, `STEER RIGHT`, `PROCEED WITH CAUTION`, or `STOP - ROAD BLOCKED` when hazards obstruct all paths.
+- **Offline Voice Guidance**: Integrated text-to-speech engine (`flutter_tts`) that announces hazard severity, size, and directional evasive alerts hands-free with intelligent announcement cooldowns.
+- **Temporal Multi-Frame Tracking & Deduplication**:
+  - Assigns persistent Track IDs across consecutive frames.
+  - Requires 2-frame persistence before triggering alerts to eliminate single-frame transient false positives.
+  - Smart cooldown prevents duplicate alerts and history spam for the same pothole.
 - **100% On-Device Edge AI**: High-speed neural inference on smartphone hardware via TensorFlow Lite (`pothole_model.tflite`). No internet connection, cloud API, or external GPU server needed.
 - **Decoupled Dual-Microcontroller Architecture**: 
   - **ESP32-CAM**: Dedicated exclusively to high-throughput HTTP MJPEG video streaming (`:81/stream`) and snapshot capture (`/capture`).
   - **ESP32 DevKit**: Dedicated to motor actuation, ultrasonic collision avoidance, road depth measurement, and inertial telemetry.
 - **6WD Robotic Drive Base**: Controlled through an L298N dual H-bridge motor driver for robust cross-terrain mobility over distressed asphalt.
-- **Dual-Sensor Depth & Vibration Fusion**:
-  - **HC-SR04 (Downward)**: Physical pothole depth profiling.
-  - **HC-SR04 (Forward)**: Autonomous obstacle collision avoidance.
-  - **MPU-6050 (6-DOF IMU)**: Road surface roughness, impact vibration, and chassis tilt.
 - **Real-Time Hazard Severity Grading**: Dynamic 0-100 scoring based on hazard bounding box geometry, proximity to camera perspective horizon, and model prediction confidence.
-- **Clean Modern Flutter Companion App**: Real-time visual bounding box rendering, live latency metrics (preprocess and inference time), visual telemetry, and historical defect logging with snapshot preservation.
+- **Centralized Runtime Configuration**: Comprehensive UI in the app settings to adjust confidence thresholds, IoU thresholds, minimum size filters (px/cm), and camera mounting geometry on the fly.
+
+---
+
+## System Demo Video
+
+https://github.com/drax-glitch/pothole-finder/raw/main/docs/images/serbot_system_demo.mp4
+
+> **[Click here to watch or download the SERBOT Live Demonstration Video](docs/images/serbot_system_demo.mp4)**
+> 
+> *Demonstrating the live 6WD robot chassis, ESP32-CAM optical feed, real-time bounding box localization, and multi-pothole direction guidance.*
 
 ---
 
@@ -155,6 +176,58 @@ Severity Index Calculation <- Non-Maximum Suppression (IoU) <- TFLite Inference
 | **Input Normalization** | Pixel RGB values scaled to `[0.0, 1.0]`, Letterbox padded (`#727272` / 114) |
 | **Output Shape** | `[1, 5, 8400]` - `[cx, cy, w, h]` (normalised 0-1 or absolute coords) + class confidence |
 | **Flexibility** | Dynamic runtime tensor layout detection (automatically handles NCHW/NHWC and relative/pixel formats) |
+
+---
+
+## Physical Pothole Measurement & Camera Geometry
+
+A major limitation of naive bounding-box systems is reporting dimensions only in image pixels, which vary drastically with camera distance and perspective. PotFinder provides **both pixel dimensions and metric physical measurements (cm)** using a calibrated planar pinhole projection model (`GroundPlaneEstimator`).
+
+```
+                Camera [Height H, Tilt Angle theta]
+                  \
+                   \ LOS (Line of Sight)
+                    \
+                     \
+    ==================*===========*================ Ground Plane
+                   P_top       P_bottom (y_bottom -> Distance Z)
+```
+
+### Camera Projection Formula
+
+For a camera mounted at ground clearance $H$ and downward depression angle $\theta$:
+
+1. **Forward Distance ($Z$ in cm)** from bottom edge $y_b$:
+   $$\alpha = \arctan\left(\frac{y_b - c_y}{f_y}\right),\quad Z = \frac{H}{\tan(\theta + \alpha)}$$
+
+2. **Ground Sampling Distance (Scale $S_x$ in cm/pixel)**:
+   $$S_x = \frac{Z}{f_x} = \frac{H}{f_x \cdot \tan(\theta + \alpha)}$$
+
+3. **Physical Dimensions**:
+   $$\text{Width (cm)} = \Delta x_{\text{pixels}} \cdot S_x,\qquad \text{Length (cm)} \approx \Delta y_{\text{pixels}} \cdot S_y$$
+
+*All camera parameters ($H$, $\theta$, focal length, and minimum size filters) are directly configurable in `lib/detection_config.dart` or via the in-app Settings UI.*
+
+---
+
+## Intelligent Direction Guidance
+
+To assist autonomous or manual navigation, PotFinder divides the optical field of view into three lateral travel corridors:
+
+```
++-------------------+-------------------+-------------------+
+|     LEFT LANE     |    CENTRE LANE    |    RIGHT LANE     |
+|    (0.0 - 0.33)   |   (0.33 - 0.66)   |   (0.66 - 1.0)    |
+|                   |   [SERBOT PATH]   |                   |
++-------------------+-------------------+-------------------+
+```
+
+- When the centre lane is clear: **`PROCEED WITH CAUTION`** (or `CLEAR`).
+- When a pothole occupies the centre corridor:
+  - If the left lane has fewer or smaller hazards: **`STEER LEFT`**
+  - If the right lane has fewer or smaller hazards: **`STEER RIGHT`**
+  - If all corridors are obstructed: **`STOP - ROAD BLOCKED`**
+- Guidance updates in real time on the HUD and can be announced via the integrated offline voice synthesis engine (`flutter_tts`).
 
 ---
 
@@ -288,19 +361,24 @@ pothole-finder/
 │       └── serbot_system_demo.mp4   # System demonstration video
 ├── lib/
 │   ├── main.dart                    # Application entry point & theme configuration
+│   ├── detection_config.dart        # Centralized thresholds, size filters & camera geometry
 │   ├── detector.dart                # TFLite YOLOv8 inference engine & bounding box decoder
+│   ├── history_db.dart              # SQLite defect history storage & snapshot manager
 │   ├── mjpeg.dart                   # High-performance HTTP MJPEG binary stream reader
-│   ├── overlay.dart                 # Real-time bounding box & HUD painter
-│   ├── state.dart                   # Application state & stream lifecycle manager
+│   ├── overlay.dart                 # Real-time HUD, dual chips (px+cm), and direction panel
+│   ├── state.dart                   # Application state, multi-frame tracking & deduplication
 │   ├── theme.dart                   # Dark asphalt UI theme & color tokens
-│   ├── vision_math.dart             # Box geometry, NMS, & severity calculations
+│   ├── vision_math.dart             # Box geometry, greedy NMS, GroundPlaneEstimator & steering logic
+│   ├── voice_service.dart           # Offline text-to-speech hazard announcements
 │   └── screens/
 │       ├── connect.dart             # Stream connection & IP setup screen
-│       ├── history.dart             # Local defect log with saved snapshots
-│       ├── live.dart                # Live detection canvas
-│       ├── photo_test.dart          # Static image inference testing tool
-│       └── settings.dart            # Inference thresholds & model diagnostics
-├── pubspec.yaml                     # Dependencies (tflite_flutter, image, etc.)
+│       ├── history.dart             # Local defect log with saved snapshots & cm measurements
+│       ├── live.dart                # Live detection canvas with corridor overlays
+│       ├── photo_test.dart          # Static image inference & calibration testing tool
+│       └── settings.dart            # Live controls for thresholds, filters & camera setup
+├── test/
+│   └── pipeline_test.dart           # Unit test suite for NMS, size filters & geometry
+├── pubspec.yaml                     # Dependencies (tflite_flutter, flutter_tts, sqflite, etc.)
 └── README.md                        # Documentation
 ```
 

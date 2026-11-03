@@ -5,6 +5,7 @@ import '../overlay.dart';
 import '../detector.dart';
 import '../state.dart';
 import '../theme.dart';
+import '../vision_math.dart';
 
 class LiveScreen extends StatelessWidget {
   const LiveScreen({super.key});
@@ -13,14 +14,19 @@ class LiveScreen extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(children: [
-            const Expanded(
-              child: Text('PotFinder',
-                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: C.yellow)),
+          // ---------------- Header ----------------
+          const Row(children: [
+            Expanded(
+              child: Text(
+                'PotFinder',
+                style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: C.yellow),
+              ),
             ),
-            const _StatusPill(),
+            _StatusPill(),
           ]),
           const SizedBox(height: 14),
+
+          // ---------------- Camera + detection canvas ----------------
           AspectRatio(
             aspectRatio: 4 / 3,
             child: ClipRRect(
@@ -37,7 +43,15 @@ class LiveScreen extends StatelessWidget {
                             valueListenable: app.result,
                             builder: (_, r, __) => r == null
                                 ? const SizedBox.shrink()
-                                : CustomPaint(painter: DetBoxPainter(r.dets, r.frameW, r.frameH)),
+                                : CustomPaint(
+                                    painter: DetBoxPainter(
+                                      r.dets,
+                                      r.frameW,
+                                      r.frameH,
+                                      estimator: app.currentEstimator,
+                                      showPhysicalUnits: true,
+                                    ),
+                                  ),
                           ),
                           Positioned(
                             top: 8,
@@ -48,12 +62,44 @@ class LiveScreen extends StatelessWidget {
                                   ? Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                       decoration: BoxDecoration(
-                                          color: C.mint, borderRadius: BorderRadius.circular(6)),
-                                      child: const Text('DETECTING',
-                                          style: TextStyle(
-                                              color: C.asphalt, fontWeight: FontWeight.w800, fontSize: 11)),
+                                        color: C.mint,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'DETECTING',
+                                        style: TextStyle(
+                                          color: C.asphalt,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 11,
+                                        ),
+                                      ),
                                     )
                                   : const SizedBox.shrink(),
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: ValueListenableBuilder<DetectResult?>(
+                              valueListenable: app.result,
+                              builder: (_, r, __) {
+                                if (r == null || r.dets.isEmpty) return const SizedBox.shrink();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: C.warn,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '${r.dets.length} pothole${r.dets.length == 1 ? '' : 's'}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ]),
@@ -62,6 +108,8 @@ class LiveScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
+
+          // Model error banner
           ValueListenableBuilder<String>(
             valueListenable: app.detector.status,
             builder: (_, s, __) => app.detector.error == null
@@ -74,6 +122,8 @@ class LiveScreen extends StatelessWidget {
                     ),
                   ),
           ),
+
+          // Stats tiles
           Row(children: [
             Expanded(child: _Tile('Potholes', app.potholeCount, (v) => '$v')),
             const SizedBox(width: 10),
@@ -82,6 +132,83 @@ class LiveScreen extends StatelessWidget {
             Expanded(child: _Tile('ms / frame', app.inferMs, (v) => '$v')),
           ]),
           const SizedBox(height: 14),
+
+          // Intelligent Direction Guidance Panel
+          ValueListenableBuilder<DetectResult?>(
+            valueListenable: app.result,
+            builder: (_, r, __) {
+              if (r == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: DirectionPanel(r.direction),
+              );
+            },
+          ),
+
+          // Pothole Size & Metrics Breakdown Panel
+          ValueListenableBuilder<DetectResult?>(
+            valueListenable: app.result,
+            builder: (_, r, __) {
+              if (r == null || r.dets.isEmpty) return const SizedBox.shrink();
+              return Panel(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Text(
+                        '${r.dets.length} Pothole${r.dets.length == 1 ? '' : 's'} Detected',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                      ),
+                      const Spacer(),
+                      const Text(
+                        'Original Image Scale',
+                        style: TextStyle(color: C.muted, fontSize: 11),
+                      ),
+                    ]),
+                    const SizedBox(height: 10),
+                    for (var i = 0; i < r.dets.length; i++) ...[
+                      _DetMeasurementRow(
+                        index: i + 1,
+                        d: r.dets[i],
+                        fw: r.frameW,
+                        fh: r.frameH,
+                        estimator: app.currentEstimator,
+                      ),
+                      if (i < r.dets.length - 1) const Divider(height: 12),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Text('Pre: ${r.preMs}ms  Inf: ${r.inferMs}ms',
+                          style: const TextStyle(color: C.muted, fontSize: 11)),
+                      const Spacer(),
+                      Text('Resolution: ${r.frameW}×${r.frameH}',
+                          style: const TextStyle(color: C.muted, fontSize: 11)),
+                    ]),
+                  ],
+                ),
+              );
+            },
+          ),
+
+          // Detection Diagnostic Pipeline Log
+          ValueListenableBuilder<DetectResult?>(
+            valueListenable: app.result,
+            builder: (_, r, __) {
+              if (r == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: DetectionLogPanel(
+                  candidates: r.candidateCount,
+                  afterNms: r.afterNmsCount,
+                  finalCount: r.afterSizeCount,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+
+          // Controls
           ValueListenableBuilder<bool>(
             valueListenable: app.detecting,
             builder: (_, on, __) => FilledButton.icon(
@@ -95,6 +222,7 @@ class LiveScreen extends StatelessWidget {
             ),
           ),
           TextButton(onPressed: app.resetCount, child: const Text('Reset count')),
+
           ValueListenableBuilder<String>(
             valueListenable: app.lastError,
             builder: (_, e, __) => e.isEmpty
@@ -102,6 +230,104 @@ class LiveScreen extends StatelessWidget {
                 : Text(e, style: const TextStyle(color: C.warn, fontSize: 12)),
           ),
         ],
+      );
+}
+
+class _DetMeasurementRow extends StatelessWidget {
+  final int index;
+  final Detection d;
+  final int fw, fh;
+  final GroundPlaneEstimator estimator;
+
+  const _DetMeasurementRow({
+    required this.index,
+    required this.d,
+    required this.fw,
+    required this.fh,
+    required this.estimator,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sev = rateSeverity(d, fw, fh);
+    final sevCol = severityColor(sev.label);
+    final confPct = (d.conf * 100).toStringAsFixed(1);
+    final phys = estimator.estimate(d, fw, fh);
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: sevCol.withAlpha(40),
+            border: Border.all(color: sevCol),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              '$index',
+              style: TextStyle(color: sevCol, fontSize: 10, fontWeight: FontWeight.w900),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('Pothole #$index ($confPct% conf)',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        const Spacer(),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: sevCol.withAlpha(30),
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(color: sevCol.withAlpha(120)),
+          ),
+          child: Text(sev.label,
+              style: TextStyle(color: sevCol, fontSize: 10, fontWeight: FontWeight.w800)),
+        ),
+      ]),
+      const SizedBox(height: 6),
+      // Precise size measurements in pixels
+      Row(children: [
+        _sizePill('Width', '${d.w.round()} px'),
+        const SizedBox(width: 6),
+        _sizePill('Height', '${d.h.round()} px'),
+        const SizedBox(width: 6),
+        _sizePill('Area', '${(d.area / 1000).toStringAsFixed(1)}k px²'),
+      ]),
+      // Ground plane estimated physical size in cm
+      if (phys.isValid) ...[
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: C.asphalt,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            'Ground plane estimate: ~${phys.widthCm.toStringAsFixed(0)} cm (W) × '
+            '${phys.lengthCm.toStringAsFixed(0)} cm (L)  |  '
+            'Area: ~${phys.areaCm2.toStringAsFixed(0)} cm²  |  '
+            'Dist: ~${phys.distanceCm.toStringAsFixed(0)} cm',
+            style: const TextStyle(color: C.mint, fontSize: 10, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ]);
+  }
+
+  Widget _sizePill(String k, String v) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: C.asphalt,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(children: [
+            Text('$k: ', style: const TextStyle(color: C.muted, fontSize: 10)),
+            Text(v, style: const TextStyle(color: C.text, fontSize: 10, fontWeight: FontWeight.w700)),
+          ]),
+        ),
       );
 }
 

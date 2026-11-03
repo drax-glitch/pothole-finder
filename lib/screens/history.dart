@@ -18,8 +18,14 @@ class HistoryScreen extends StatelessWidget {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text('History',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: C.yellow)),
+                Row(children: [
+                  const Text('History',
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: C.yellow)),
+                  const Spacer(),
+                  if (rows.isNotEmpty)
+                    Text('${rows.length} event${rows.length == 1 ? '' : 's'}',
+                        style: const TextStyle(color: C.muted, fontSize: 13, fontWeight: FontWeight.w700)),
+                ]),
                 const SizedBox(height: 12),
                 if (rows.isEmpty)
                   const Padding(
@@ -64,11 +70,20 @@ class _ItemState extends State<_Item> {
     final r = widget.r;
     final sev = r['severity'] as String;
     final fw = r['fw'] as int, fh = r['fh'] as int;
-    final d = Detection((r['l'] as num).toDouble(), (r['t'] as num).toDouble(),
-        (r['r'] as num).toDouble(), (r['b'] as num).toDouble(), (r['conf'] as num).toDouble(), 0);
+    final d = Detection(
+      (r['l'] as num).toDouble(),
+      (r['t'] as num).toDouble(),
+      (r['r'] as num).toDouble(),
+      (r['b'] as num).toDouble(),
+      (r['conf'] as num).toDouble(),
+      0,
+    );
     final time = DateTime.fromMillisecondsSinceEpoch(r['ts'] as int);
     final t = '${time.day}/${time.month} ${time.hour.toString().padLeft(2, '0')}:'
         '${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+
+    final phys = app.currentEstimator.estimate(d, fw, fh);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: GestureDetector(
@@ -93,22 +108,44 @@ class _ItemState extends State<_Item> {
                       const Spacer(),
                       Text(t, style: const TextStyle(color: C.muted, fontSize: 12)),
                     ]),
-                    Text('Confidence ${((d.conf) * 100).round()}%   Score ${(r['score'] as num).round()}/100',
-                        style: const TextStyle(fontSize: 13)),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Confidence ${((d.conf) * 100).round()}%   •   Score ${(r['score'] as num).round()}/100',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Size: ${d.w.round()}×${d.h.round()} px (${d.area.round()} px²)${phys.isValid ? '   •   ~${phys.widthCm.toStringAsFixed(0)}×${phys.lengthCm.toStringAsFixed(0)} cm' : ''}',
+                      style: const TextStyle(color: C.muted, fontSize: 12),
+                    ),
                     if (_open) ...[
                       const SizedBox(height: 10),
-                      Text('Size: ${d.w.round()} x ${d.h.round()} px   Depth: not measured',
-                          style: const TextStyle(color: C.muted, fontSize: 13)),
+                      if (phys.isValid)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: C.asphalt,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: C.line),
+                          ),
+                          child: Text(
+                            'Estimated footprint: ~${phys.areaCm2.toStringAsFixed(0)} cm²  |  Dist: ~${phys.distanceCm.toStringAsFixed(0)} cm ahead',
+                            style: const TextStyle(color: C.mint, fontSize: 11, fontWeight: FontWeight.w700),
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: AspectRatio(
                           aspectRatio: fw / fh,
                           child: Stack(fit: StackFit.expand, children: [
-                            Image.file(File(r['image'] as String), fit: BoxFit.contain,
+                            Image.file(File(r['image'] as String),
+                                fit: BoxFit.contain,
                                 errorBuilder: (_, __, ___) =>
                                     const Center(child: Text('Image missing'))),
-                            CustomPaint(painter: DetBoxPainter([d], fw, fh)),
+                            CustomPaint(
+                              painter: DetBoxPainter([d], fw, fh, estimator: app.currentEstimator),
+                            ),
                           ]),
                         ),
                       ),
