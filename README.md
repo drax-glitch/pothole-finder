@@ -15,7 +15,7 @@ The system pairs an **ESP32-CAM** optical inspection unit with an **ESP32 DevKit
 
 ## Table of Contents
 - [Key Features](#key-features)
-- [System Demo Video](#system-demo-video)
+- [Live System Demo](#live-system-demo)
 - [System Architecture](#system-architecture)
 - [Circuit Schematics & Hardware Wiring](#circuit-schematics--hardware-wiring)
 - [Power Distribution Architecture](#power-distribution-architecture)
@@ -55,13 +55,19 @@ The system pairs an **ESP32-CAM** optical inspection unit with an **ESP32 DevKit
 
 ---
 
-## System Demo Video
+## Live System Demo
 
-https://github.com/drax-glitch/pothole-finder/raw/main/docs/images/serbot_system_demo.mp4
+<div align="center">
 
-> **[Click here to watch or download the SERBOT Live Demonstration Video](docs/images/serbot_system_demo.mp4)**
-> 
-> *Demonstrating the live 6WD robot chassis, ESP32-CAM optical feed, real-time bounding box localization, and multi-pothole direction guidance.*
+[![SERBOT Live System Demo](docs/images/serbot_demo.gif)](docs/images/serbot_system_demo.mp4)
+
+<br/>
+
+> 🎥 **[Click here to watch / download the full HD video (`serbot_system_demo.mp4`)](docs/images/serbot_system_demo.mp4)**
+>
+> *Live demonstration of the SERBOT 6WD robot chassis, ESP32-CAM live streaming, on-device YOLOv8 inference, multi-pothole localization, physical size calculation, and direction guidance.*
+
+</div>
 
 ---
 
@@ -358,7 +364,9 @@ pothole-finder/
 │       ├── circuit_pinout.jpg       # Pinout and electrical connection schematic
 │       ├── power_distribution.png   # Dual-rail battery power tree
 │       ├── system_architecture.png  # Distributed multi-node SERBOT architecture
-│       └── serbot_system_demo.mp4   # System demonstration video
+│       ├── serbot_demo.gif          # Animated system demonstration preview
+│       ├── demo_poster.jpg          # System demonstration poster frame
+│       └── serbot_system_demo.mp4   # Full demonstration video
 ├── lib/
 │   ├── main.dart                    # Application entry point & theme configuration
 │   ├── detection_config.dart        # Centralized thresholds, size filters & camera geometry
